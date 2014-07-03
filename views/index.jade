@@ -1,0 +1,12 @@
+extends layout
+
+block content
+  h1= title
+  p Welcome to #{title}
+  a(href="/" target="_blank") New Tab
+  br
+  a(href="javascript:closeConn()") close
+  br
+  a(href="javascript:openConn()") open
+  br
+  a(href="javascript:purgePlayers()") Purge Players
