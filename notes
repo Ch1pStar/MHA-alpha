@@ -1,0 +1,2 @@
+Replace players array in client with a player(current client representitive)object and enemies(other connected clients) array;
+
