@@ -88,7 +88,6 @@ function openConn () {
 
 }
 
-
 function preload() {
 
     game.load.tilemap('map', 'assets/tilemaps/maps/collision_test.json', null, Phaser.Tilemap.TILED_JSON);
@@ -98,7 +97,6 @@ function preload() {
     game.load.image('ship', 'assets/sprites/thrust_ship2.png');
 
 }
-
 
 function create() {
 
@@ -166,6 +164,7 @@ function addPlayerToGame(data) {
 	console.log(obj);
     game.physics.p2.enable(obj);
     game.camera.follow(obj);
+	obj.body.setZeroRotation();
     currPlayer = obj;
 	return currPlayer;
 }
@@ -175,7 +174,7 @@ function addNewlyConnectedPlayer(data){
 	obj.id = data.id;
 	game.physics.p2.enable(obj);
     game.camera.follow(obj);
-    console.log(obj.id);
+    obj.body.setZeroRotation();
 	players[obj.id-1] = obj;
 	return players[obj.id];
 }
@@ -214,10 +213,8 @@ function updatePlayerPosition(data){
 	currPlayer.x = data.x;
 	currPlayer.y = data.y;
 	console.log("Curr player: ", currPlayer, data);
-	//player.body.thrust(400);
+	currPlayer.body.thrust(400);
 }
-
-
 
 function updatePlayerPositionViewers (playerId) {
 	
@@ -231,14 +228,12 @@ function purgePlayers(){
 	connection.send(JSON.stringify({action:"purgePlayers"}))
 }
 
-
 function purgePlayersServerResponse() {
 	for (var i = 0; i < players.length; i++) {
 		players[i].destroy();
 	};
 	players = Array();
 }
-
 
 function update() {
 
@@ -276,7 +271,6 @@ function update() {
 function render() {
 
 }
-
 
 $(document).ready(function(){
 
