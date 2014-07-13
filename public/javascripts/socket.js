@@ -9,6 +9,9 @@ var map;
 var layer;
 var cursors;
 var game;
+var maxLag = 0;
+var maxYDiff = 0;
+var tileBodies;
 function closeConn () {
 	connection.close();
 }
@@ -49,7 +52,7 @@ function openConn () {
 				break;
 			case "updatePlayerPosition":
 				console.log('updatePlayerPosition\n');
-				updatePlayerPosition(parsedData.player);
+				updatePlayerPosition(parsedData.player, parsedData.time);
 				break;
 			case "updatePlayerPositionViewers":
 				console.log('updatePlayerPosition\n');
@@ -121,11 +124,12 @@ function create() {
     //  Convert the tilemap layer into bodies. Only tiles that collide (see above) are created.
     //  This call returns an array of body objects which you can perform addition actions on if
     //  required. There is also a parameter to control optimising the map build.
-    game.physics.p2.convertTilemap(map, layer);
+    tileBodies = game.physics.p2.convertTilemap(map, layer);
 
 
     connection.send(JSON.stringify({action:'ping'})); // Send the message 'Ping' to the server
-    addPlayerServer(Math.floor((Math.random() * 200) + 100), Math.floor((Math.random() * 200) + 100)); 
+    addPlayerServer(144, 180); 
+    // addPlayerServer(Math.floor((Math.random() * 200) + 100), Math.floor((Math.random() * 200) + 100)); 
 
 
     //  By default the ship will collide with the World bounds,
@@ -147,7 +151,7 @@ function create() {
 function addPlayerServer(x, y){
     data = {
     	action: 'createPlayer',
-    	sprite: new RequestNewPlayer(x,y,0,0)
+    	sprite: new RequestNewPlayer(x,y,0)
     }
 	connection.send(JSON.stringify(data));
 }
@@ -161,10 +165,11 @@ function removePlayer(id){
 function addPlayerToGame(data) {
 	obj = game.add.sprite(data.x, data.y, 'ship');
 	obj.id = data.id;
+	console.log(data.id);
 	console.log(obj);
     game.physics.p2.enable(obj);
     game.camera.follow(obj);
-	obj.body.setZeroRotation();
+	// obj.body.setZeroRotation();
     currPlayer = obj;
 	return currPlayer;
 }
@@ -205,15 +210,50 @@ function PhaserSpriteDataTransferObject(sprite){
 function RequestNewPlayer(x,y,z,angle){	
 	this.x = x;
 	this.y = y;
-	this.z = z;
+	this.mass = 1;
 	this.angle = angle;
 }
 
-function updatePlayerPosition(data){
-	currPlayer.x = data.x;
-	currPlayer.y = data.y;
-	console.log("Curr player: ", currPlayer, data);
-	currPlayer.body.thrust(400);
+function updatePlayerPosition(data, time){
+	
+	if(Math.abs(Math.abs(currPlayer.body.x) - Math.abs(data.x)) > 2){
+		currPlayer.body.x = data.x;
+		currPlayer.x = data.x;
+		console.log("ADJUSTING FOR X LAG\n");
+	}
+	
+	var yDiff = Math.abs(Math.abs(currPlayer.body.y) - Math.abs(data.y));
+
+	if(maxYDiff < yDiff)
+		maxYDiff = yDiff;
+
+	console.log("Y diff: ", yDiff);
+	console.log("MAX Y diff: ", maxYDiff);
+
+
+	if(yDiff > 1){
+		currPlayer.body.y = data.y;
+		currPlayer.y = data.y;
+		console.log("ADJUSTING FOR Y LAG\n");
+	}
+	
+	currPlayer.angle = data.angle;
+	currPlayer.body.angle = data.angle;
+
+	// console.log("Curr player: ", currPlayer, data);
+	var lag =  parseInt(new Date().getTime()-parseInt(time));
+	if(maxLag<lag){
+		maxLag = lag;
+	}
+	console.log("MAX LAG: ", maxLag);
+	console.log("LAG: ", lag);
+	// currPlayer.body.thrust(400);
+}
+
+function movePlayer(direction) {
+   	connection.send(JSON.stringify({action:'movePlayer', currPlayerId: currPlayer.id}))
+	
+   	currPlayer.body.reverse(400);
 }
 
 function updatePlayerPositionViewers (playerId) {
@@ -256,7 +296,7 @@ function update() {
 
     if (cursors.up.isDown)
     {
-    	connection.send(JSON.stringify({action:'movePlayer', currPlayerId: currPlayer.id}))
+    	movePlayer('forward');
     	// connection.send('forward');
         // ship.body.thrust(400);
     }
