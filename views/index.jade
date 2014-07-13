@@ -1,5 +1,14 @@
 extends layout
 
+block head
+    title= title
+    link(rel='stylesheet', href='/stylesheets/style.css')
+    script(src='/javascripts/jquery-2.0.3.min.js')
+    script(src='/javascripts/gamecontroller.js')
+    script(src='/javascripts/phaser.js')
+    script(src='/javascripts/Player.js')
+    script(src='/javascripts/socket.js')
+
 block content
   h1= title
   p Welcome to #{title}
@@ -8,5 +17,3 @@ block content
   a(href="javascript:closeConn()") close
   br
   a(href="javascript:openConn()") open
-  br
-  a(href="javascript:purgePlayers()") Purge Players

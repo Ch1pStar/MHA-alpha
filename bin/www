@@ -1,0 +1,262 @@
+#!/usr/bin/env node
+var debug = require('debug')('MHA-new');
+var app = require('../app');
+var WebSocketServer = require('ws').Server;
+
+app.set('port', process.env.PORT || 3000);
+
+var server = app.listen(app.get('port'), function() {
+  debug('Express server listening on port ' + server.address().port);
+});
+
+var p2 = require('p2');
+var ws = require('ws');
+
+// Create a World
+var world = new p2.World({
+    doProfiling:true,                    // Enable stats
+    gravity : [0,0],                   // Set gravity to -10 in y direction
+    broadphase : new p2.SAPBroadphase(), // Broadphase algorithm
+});
+
+var players = [];
+
+// To get the trajectories of the bodies,
+// we must step the world forward in time.
+// This is done using a fixed time step size.
+var timeStep = 1 / 60; // seconds
+
+
+var wss = new WebSocketServer({server: server});
+wss.on('connection', function(ws) {
+
+
+	console.log('started client interval');
+
+	console.log("length: ", players.length);
+
+	ws.on('message', function(e){
+	  	console.log(e);
+
+	  	var parsedData = JSON.parse(e);
+
+	  	console.log(parsedData.action);
+
+	  	switch(parsedData.action){
+	  		case "ping":
+	  			console.log('Pong')
+				sendExistingPlayers(ws);
+	  			break;
+	  		case "createPlayer":
+	  			addPlayer(ws);
+	  			break;
+			case "move":
+				console.log("RECIEVED TOKEN: ", parsedData.token);
+	  			updatePlayerPosition(parsedData.direction, parsedData.token);
+	  			break;
+			// case "purgePlayers":
+			// 	purgePlayers(ws);
+	  // 			break;
+	  		default:
+	  			console.log('Unknown action\n');
+
+	  	}
+	  	//console.log(players);
+
+
+	});
+
+	
+
+});
+
+// The "Game loop". Could be replaced by, for example, requestAnimationFrame.
+setInterval(function(){
+
+    // The step method moves the bodies forward in time.
+    world.step(timeStep);
+
+    var parsedPlayers = [];
+	for (var i = 0; i < players.length; i++) {
+		parsedPlayers[i] = new TransferObject(players[i]);
+	};
+
+	var data = {
+		action: "updatePlayers",
+		players: parsedPlayers
+	}
+	broadcastData(data);
+
+    // Print the circle position to console.
+    // Could be replaced by a render call.
+    
+    // if(typeof players!= 'undefined'){
+	   //  if(typeof players[0]!= 'undefined'){
+	   //  	var currPlayer = players[0];
+		  //   // console.log("Circle x position: " + currPlayer.body.position[0]);
+		  //   console.log("Circle y position: " + currPlayer.body.position[1]);
+		  //   sendPlayersPositions(currPlayer);
+		  //   // console.log(currPlayer.body.mass);
+	   //  }
+    // }
+
+}, 1000 * timeStep);
+
+
+function updatePlayerPosition(direction, token) {
+	var p = players.filter(function(e){
+		return e.token == token;
+	});
+	try{
+		p = p[0];
+
+		if(p === undefined){
+			throw "OBJECT WITH TOKEN :" + token +" NOT FOUND!";
+		}
+
+		switch(direction){
+			case "forward":
+				p.thrust(400);
+				break;
+			case "stop":
+				break;
+			default:
+				console.log("Unknown direction");
+		}
+	}catch(e){
+		console.log(e.message);
+	}
+}
+
+function addPlayer(ws) {
+	var player = new Player(ws);
+	// players[player.id] = player;
+	players.push(player);
+	data = {
+		action: 'playerAdded',
+		playerData: new TransferObject(player),
+		token: player.token
+	}
+	ws.send(JSON.stringify(data));
+
+	data.action = "newPlayerConnected";
+	broadcastData(data);
+
+}
+
+function sendExistingPlayers(ws){
+	var parsedPlayers = [];
+	for (var i = 0; i < players.length; i++) {
+		parsedPlayers[i] = new TransferObject(players[i]);
+	};
+
+	data = {
+		action: "loadExistingPlayers",
+		players: parsedPlayers
+	}
+	ws.send(JSON.stringify(data));
+}
+
+
+function removePlayer(id) {
+	console.log("Deleting player: " + id);
+	var dp = players.filter(function(e){
+		return e.id == id;
+	});
+
+	players.splice(players.indexOf(dp),1);
+
+	var data = {
+		action: "removePlayer",
+		playerId: id
+	};
+	broadcastData(data);
+
+}
+
+
+function broadcastData(data) {
+
+	for (var i = 0; i < wss.clients.length; i++) {
+		try{
+			var p = wss.clients[i];
+			p.send(JSON.stringify(data));
+		}catch(e){
+			console.log("Index: " + i);
+			console.log(e.message);
+		}		
+	};
+}
+
+Player = function(ws){
+	this.body =  new p2.Body({ position: [Math.floor((Math.random() * 200) + 100), Math.floor((Math.random() * 200) + 100)], mass: 1 });
+	this.force = [0,0];
+	this.id = this.body.id;
+	this.token = token();
+	
+	var playerId = this.id
+
+	ws.on('close', function() {
+		removePlayer(playerId);
+	});
+
+
+	this.ws = ws;
+}
+
+Player.prototype = {
+	thrust: function(speed){
+     	var magnitude = this.pxmi(speed);
+        var angle = this.body.angle + Math.PI / 2;
+		
+
+		// console.log(magnitude,this.body.angle,angle);
+		// process.exit(1);
+
+
+        this.force[0] += (magnitude * Math.cos(angle));
+        this.force[1] += (magnitude * Math.sin(angle));
+
+        this.body.force[0] = this.force[0]
+        this.body.force[1] = this.force[1];
+
+        console.log("Movement stuff: ", this.body.force[0], this.body.force[1]);
+
+	},
+
+
+	reverse: function (speed) {
+
+        var magnitude = this.pxmi(speed);
+        var angle = this.body.angle + Math.PI / 2;
+        
+
+        this.force[0] -= (magnitude * Math.cos(angle));
+        this.force[1] -= (magnitude * Math.sin(angle));
+
+        this.body.force[0] = this.force[0]
+        this.body.force[1] = this.force[1];
+
+    },
+
+	pxmi: function (v) {
+        return v * -0.05;
+    }
+};
+
+
+function TransferObject(obj) {
+	this.x = obj.body.position[0];
+	this.y = obj.body.position[1];
+	this.angle = obj.body.angle;
+	this.id = obj.id;
+}
+
+
+var rand = function() {
+    return Math.random().toString(36).substr(2); // remove `0.`
+};
+
+var token = function() {
+    return rand() + rand(); // to make it longer
+};

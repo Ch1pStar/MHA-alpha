@@ -1,9 +1,8 @@
 
 var connection;
 
-var ship;
-var ship2;
-var players = Array();
+
+var players = [];
 var currPlayer;
 var map;
 var layer;
@@ -11,9 +10,60 @@ var cursors;
 var game;
 var maxLag = 0;
 var maxYDiff = 0;
-var tileBodies;
+var token;
+
+var movementData = {
+    	action: "move",
+}
+
+Player = function(data){
+	console.log("Player data...",data);
+	this.obj = game.add.sprite(data.x, data.y, 'ship');
+	this.id = data.id;
+	
+	// console.log(data.id);
+	// console.log(this.obj);
+   
+    game.physics.p2.enable(this.obj);
+	// this.obj.body.setZeroRotation();
+};
+
+Player.prototype.thrust = function(speed){
+		this.obj.body.thrust(speed);
+};
+
+Player.prototype.updatePosition = function(data){
+	console.log("Got updated data for player: " + this.id);
+	console.log("I've got this data: ", this.obj.body.x, this.obj.body.y);
+	console.log("Reel Data: ", data);
+
+	
+}
+
+function addPlayerServer(){
+    data = {
+    	action: 'createPlayer'
+    }
+	connection.send(JSON.stringify(data));
+}
+
+function loadExistingPlayers(playersData) {
+	for (var i = 0; i <= playersData.length - 1; i++) {
+		var data = playersData[i];
+		var player = new Player(data);
+		players.push(player);
+	};
+}
+
+
 function closeConn () {
 	connection.close();
+}
+
+function getPlayerById(id) {
+	return players.filter(function(e){
+		return e.id == id;
+	});
 }
 
 function openConn () {
@@ -30,7 +80,6 @@ function openConn () {
 	};
 
 	connection.onclose = function (){
-		currPlayer.destroy();
 	}
 
 	// Log messages from the server
@@ -38,54 +87,68 @@ function openConn () {
 	  	parsedData = JSON.parse(e.data);
 	  
 		switch(parsedData.action){
-			case "newPlayerCreated":
-				console.log('newPlayerCreated\n');
-				addPlayerToGame(parsedData.playerData);
+			case "playerAdded":
+				console.log('playerAdded\n');
+				currPlayer = new Player(parsedData.playerData);
+				token = parsedData.token;
+				movementData.token = token;
+    			game.camera.follow(currPlayer.obj);
 				break;
 			case "newPlayerConnected":
-				console.log('newPlayerConnected\n');
-				addNewlyConnectedPlayer(parsedData.playerData);
+				console.log('newPlayerConnected');
+				if(parsedData.playerData.id != currPlayer.id){
+					console.log("...yup i was right\n");
+					var player = new Player(parsedData.playerData);
+					players.push(player);
+				}else{
+					console.log("nvm...it was just me\n");
+				}
 				break;
-			case "addExistingPlayers":
-				console.log('addExistingPlayers\n');
-				addExistingPlayers(parsedData.players);
+			case "loadExistingPlayers":
+				console.log('loadExistingPlayers\n');
+				loadExistingPlayers(parsedData.players);
 				break;
-			case "updatePlayerPosition":
-				console.log('updatePlayerPosition\n');
-				updatePlayerPosition(parsedData.player, parsedData.time);
+			case "updatePlayers":
+				console.log('updatePlayers\n');
+				for (var i = 0; i < parsedData.players.length; i++) {
+					var pData = parsedData.players[i];
+					if(pData.id == currPlayer.id){
+						currPlayer.updatePosition(pData);
+					}else{
+						var p = getPlayerById(pData.id);
+						p = p[0];
+						p.updatePosition(pData);					
+					}
+				};
+
+				/*
+				if(parsedData.player.id == currPlayer.id){
+					currPlayer.updatePosition(parsedData.player, parsedData.time);
+				}else{
+					getPlayerById(parsedData.player.id).updatePosition(parsedData.player, parsedData.time);
+				}*/
 				break;
-			case "updatePlayerPositionViewers":
-				console.log('updatePlayerPosition\n');
-				updatePlayerPositionViewers(parsedData.player);
+			case "removePlayer":
+				console.log('removePlayer\n');
+				console.log(parsedData);
+				if(parsedData.playerId == currPlayer.id){
+					currPlayer.obj.destroy();
+				}else{
+					var dp = getPlayerById(parsedData.playerId);
+					dp = dp[0];
+					dp.obj.destroy();
+					players.splice(players.indexOf(dp),1);
+				}
 				break;
+			/*
 			case "purgePlayers":
 				console.log('purgePlayers\n');
 				purgePlayersServerResponse();
 				break;
-			case "removePlayer":
-				console.log('removePlayer\n');
-				removePlayer(parsedData.playerId);
-				break;
+			*/
 			default:
 				console.log('Unknown action\n');
 	  	}
-	  
-	  // if(e.data=='move_left'){
-	  // 	ship.body.rotateLeft(100);
-	  // 	ship2.body.rotateLeft(100);
-	  // }
-	  // else if(e.data=='move_right'){
-	  // 	ship.body.rotateRight(100);
-	  // 	ship2.body.rotateRight(100);
-	  // }
-	  // else if(e.data=='move_forward'){
-	  // 	ship.body.thrust(400);
-	  // 	ship2.body.thrust(400);
-	  // }
-	  // else if(e.data=='reverse'){
-	  // 	ship.body.reverse(400);
-	  // 	ship2.body.reverse(400);
-	  // }
 	
 	};
 
@@ -124,11 +187,16 @@ function create() {
     //  Convert the tilemap layer into bodies. Only tiles that collide (see above) are created.
     //  This call returns an array of body objects which you can perform addition actions on if
     //  required. There is also a parameter to control optimising the map build.
-    tileBodies = game.physics.p2.convertTilemap(map, layer);
+    game.physics.p2.convertTilemap(map, layer);
 
 
     connection.send(JSON.stringify({action:'ping'})); // Send the message 'Ping' to the server
-    addPlayerServer(144, 180); 
+    
+
+
+    addPlayerServer(); 
+    
+
     // addPlayerServer(Math.floor((Math.random() * 200) + 100), Math.floor((Math.random() * 200) + 100)); 
 
 
@@ -148,162 +216,43 @@ function create() {
 
 }
 
-function addPlayerServer(x, y){
-    data = {
-    	action: 'createPlayer',
-    	sprite: new RequestNewPlayer(x,y,0)
-    }
-	connection.send(JSON.stringify(data));
-}
 
-function removePlayer(id){
-	console.log(id, "Player to remove: ", players[id]);
-	players[id].destroy();
-	players.splice(id,1);
-}
-
-function addPlayerToGame(data) {
-	obj = game.add.sprite(data.x, data.y, 'ship');
-	obj.id = data.id;
-	console.log(data.id);
-	console.log(obj);
-    game.physics.p2.enable(obj);
-    game.camera.follow(obj);
-	// obj.body.setZeroRotation();
-    currPlayer = obj;
-	return currPlayer;
-}
-
-function addNewlyConnectedPlayer(data){
-	obj = game.add.sprite(data.x, data.y, 'ship');
-	obj.id = data.id;
-	game.physics.p2.enable(obj);
-    game.camera.follow(obj);
-    obj.body.setZeroRotation();
-	players[obj.id-1] = obj;
-	return players[obj.id];
-}
-
-function addExistingPlayers (playersData){
-	this.players = Array();
-	console.log(playersData)
-	for (var i = 0; i <= playersData.length - 1; i++) {
-		// console.log(players[i]);
-		var data = playersData[i];
-		obj = game.add.sprite(data.x, data.y, 'ship');
-		obj.id = data.id;
-		 console.log("adding player...");
-		 console.log(obj);
-		this.players.push(obj)
-	    game.physics.p2.enable(obj);
-	    game.camera.follow(obj);
-	};
-}
-
-function PhaserSpriteDataTransferObject(sprite){
-	this.x = sprite.x;
-	this.y = sprite.y;
-	this.z = sprite.z;
-	this.angle = sprite.angle;
-}
-
-function RequestNewPlayer(x,y,z,angle){	
-	this.x = x;
-	this.y = y;
-	this.mass = 1;
-	this.angle = angle;
-}
-
-function updatePlayerPosition(data, time){
-	
-	if(Math.abs(Math.abs(currPlayer.body.x) - Math.abs(data.x)) > 2){
-		currPlayer.body.x = data.x;
-		currPlayer.x = data.x;
-		console.log("ADJUSTING FOR X LAG\n");
-	}
-	
-	var yDiff = Math.abs(Math.abs(currPlayer.body.y) - Math.abs(data.y));
-
-	if(maxYDiff < yDiff)
-		maxYDiff = yDiff;
-
-	console.log("Y diff: ", yDiff);
-	console.log("MAX Y diff: ", maxYDiff);
-
-
-	if(yDiff > 1){
-		currPlayer.body.y = data.y;
-		currPlayer.y = data.y;
-		console.log("ADJUSTING FOR Y LAG\n");
-	}
-	
-	currPlayer.angle = data.angle;
-	currPlayer.body.angle = data.angle;
-
-	// console.log("Curr player: ", currPlayer, data);
-	var lag =  parseInt(new Date().getTime()-parseInt(time));
-	if(maxLag<lag){
-		maxLag = lag;
-	}
-	console.log("MAX LAG: ", maxLag);
-	console.log("LAG: ", lag);
-	// currPlayer.body.thrust(400);
-}
-
-function movePlayer(direction) {
-   	connection.send(JSON.stringify({action:'movePlayer', currPlayerId: currPlayer.id}))
-	
-   	currPlayer.body.reverse(400);
-}
-
-function updatePlayerPositionViewers (playerId) {
-	
-	player = players[playerId.id-1];
-	
-	player.x = playerId.x;
-	player.y = playerId.y;
-}
-
-function purgePlayers(){
-	connection.send(JSON.stringify({action:"purgePlayers"}))
-}
-
-function purgePlayersServerResponse() {
-	for (var i = 0; i < players.length; i++) {
-		players[i].destroy();
-	};
-	players = Array();
-}
 
 function update() {
 
-    if (cursors.left.isDown)
-    {
-    	// connection.send('left');
-       // ship.body.rotateLeft(100);
-    }
-    else if (cursors.right.isDown)
-    {
-    	// connection.send('right');
-        // ship.body.rotateRight(100);
-    }
-    else
-    {
-    	// connection.send('stop');
-        //ship.body.setZeroRotation();
-        //ship2.body.setZeroRotation();
-    }
 
-    if (cursors.up.isDown)
-    {
-    	movePlayer('forward');
-    	// connection.send('forward');
-        // ship.body.thrust(400);
-    }
-    else if (cursors.down.isDown)
-    {
-    	// connection.send('reverse');
-        // ship.body.reverse(400);
+    try{
+	    if (cursors.left.isDown)
+	    {
+
+	       currPlayer.obj.body.rotateLeft(100);
+	    }
+	    else if (cursors.right.isDown)
+	    {
+	      currPlayer.obj.body.rotateRight(100);
+	    }
+	    else
+	    {
+	    
+	       currPlayer.obj.body.setZeroRotation();
+	    
+	    }
+
+	    if (cursors.up.isDown){
+	        currPlayer.obj.body.thrust(400);
+	        movementData.direction = "forward";
+	        // console.log(movementData)
+	        connection.send(JSON.stringify(movementData));
+	    }
+	    else if (cursors.down.isDown)
+	    {
+	    
+	        currPlayer.obj.body.reverse(400);
+	    }
+
+    	// console.log(currPlayer.obj.body.force.destination);
+    }catch(e){
+    	console.log(e.message);
     }
 
 }
