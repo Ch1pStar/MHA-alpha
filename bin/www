@@ -30,9 +30,6 @@ var timeStep = 1 / 60; // seconds
 var wss = new WebSocketServer({server: server});
 wss.on('connection', function(ws) {
 
-
-	console.log('started client interval');
-
 	console.log("length: ", players.length);
 
 	ws.on('message', function(e){
@@ -54,24 +51,21 @@ wss.on('connection', function(ws) {
 				console.log("RECIEVED TOKEN: ", parsedData.token);
 	  			updatePlayerPosition(parsedData.direction, parsedData.token);
 	  			break;
-			// case "purgePlayers":
-			// 	purgePlayers(ws);
-	  // 			break;
 	  		default:
 	  			console.log('Unknown action\n');
 
 	  	}
 	  	//console.log(players);
-
-
 	});
-
-	
-
 });
 
-// The "Game loop". Could be replaced by, for example, requestAnimationFrame.
+
 setInterval(function(){
+
+	// tp.rotateLeft(400);
+	// tp.rotateRight(400);
+	// tp.rotateThrust(400);
+	// tp.rotateReverse(400);
 
     // The step method moves the bodies forward in time.
     world.step(timeStep);
@@ -90,18 +84,11 @@ setInterval(function(){
     // Print the circle position to console.
     // Could be replaced by a render call.
     
-    // if(typeof players!= 'undefined'){
-	   //  if(typeof players[0]!= 'undefined'){
-	   //  	var currPlayer = players[0];
-		  //   // console.log("Circle x position: " + currPlayer.body.position[0]);
-		  //   console.log("Circle y position: " + currPlayer.body.position[1]);
-		  //   sendPlayersPositions(currPlayer);
-		  //   // console.log(currPlayer.body.mass);
-	   //  }
-    // }
+    // console.log("Player position x: " + tp.body.position[0] + " y: " + tp.body.position[1]);
+
+   // console.log(tp.body.angle);
 
 }, 1000 * timeStep);
-
 
 function updatePlayerPosition(direction, token) {
 	var p = players.filter(function(e){
@@ -118,7 +105,17 @@ function updatePlayerPosition(direction, token) {
 			case "forward":
 				p.thrust(400);
 				break;
+			case "reverse":
+				p.reverse(400);
+				break;
+			case "left":
+				p.rotateLeft(100);
+				break;
+			case "right":
+				p.rotateRight(100);
+				break;
 			case "stop":
+				p.setZeroRotation();
 				break;
 			default:
 				console.log("Unknown direction");
@@ -174,7 +171,6 @@ function removePlayer(id) {
 
 }
 
-
 function broadcastData(data) {
 
 	for (var i = 0; i < wss.clients.length; i++) {
@@ -193,18 +189,28 @@ Player = function(ws){
 	this.force = [0,0];
 	this.id = this.body.id;
 	this.token = token();
+
+
+	var shape = new p2.Rectangle(50, 50);
+	this.body.addShape(shape);
+	world.addBody(this.body);
 	
 	var playerId = this.id
 
-	ws.on('close', function() {
-		removePlayer(playerId);
-	});
 
+	if(ws!=null){
+
+		ws.on('close', function() {
+			removePlayer(playerId);
+		});
+
+	}
 
 	this.ws = ws;
 }
 
 Player.prototype = {
+
 	thrust: function(speed){
      	var magnitude = this.pxmi(speed);
         var angle = this.body.angle + Math.PI / 2;
@@ -220,10 +226,9 @@ Player.prototype = {
         this.body.force[0] = this.force[0]
         this.body.force[1] = this.force[1];
 
-        console.log("Movement stuff: ", this.body.force[0], this.body.force[1]);
+        // console.log("Movement stuff: ", this.body.force[0], this.body.force[1]);
 
 	},
-
 
 	reverse: function (speed) {
 
@@ -231,16 +236,66 @@ Player.prototype = {
         var angle = this.body.angle + Math.PI / 2;
         
 
-        this.force[0] -= (magnitude * Math.cos(angle));
-        this.force[1] -= (magnitude * Math.sin(angle));
+        // REALLY FAST ACCELERATION
+        // this.force[0] -= (magnitude * Math.cos(angle));
+        // this.force[1] -= (magnitude * Math.sin(angle));
+        // this.body.force[0] = this.force[0]
+        // this.body.force[1] = this.force[1];
+        
+        this.body.force[0] += (magnitude * Math.cos(angle));
+        this.body.force[1] += (magnitude * Math.sin(angle));
 
-        this.body.force[0] = this.force[0]
-        this.body.force[1] = this.force[1];
+    },
+
+   	/**
+    * This will rotate the Body by the given speed to the left (counter-clockwise).
+    *
+    * @param {number} speed - The speed at which it should rotate.
+    */
+    rotateLeft: function (speed) {
+
+        this.body.angularVelocity = this.pxm(-speed);
+
+    },
+
+    /**
+    * This will rotate the Body by the given speed to the left (clockwise).
+    *
+    * @param {number} speed - The speed at which it should rotate.
+    */
+    rotateRight: function (speed) {
+
+        this.body.angularVelocity = this.pxm(speed);
+
+    },
+
+
+    /**
+    * If this Body is dynamic then this will zero its angular velocity.
+    *
+    */
+    setZeroRotation: function () {
+
+        this.body.angularVelocity = 0;
 
     },
 
 	pxmi: function (v) {
         return v * -0.05;
+    },
+
+    /**
+    * Convert pixel value to p2 physics scale (meters).
+    * By default Phaser uses a scale of 20px per meter.
+    * If you need to modify this you can over-ride these functions via the Physics Configuration object.
+    *
+    * @param {number} v - The value to convert.
+    * @return {number} The scaled value.
+    */
+    pxm: function (v) {
+
+        return v * 0.05;
+
     }
 };
 
@@ -254,9 +309,12 @@ function TransferObject(obj) {
 
 
 var rand = function() {
-    return Math.random().toString(36).substr(2); // remove `0.`
+    return Math.random().toString(36).substr(2);
 };
 
 var token = function() {
-    return rand() + rand(); // to make it longer
+    return rand() + rand();
 };
+
+
+var tp = new Player(null);

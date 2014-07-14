@@ -12,6 +12,8 @@ var maxLag = 0;
 var maxYDiff = 0;
 var token;
 
+var host = "ws://"+window.location.hostname+":3000/server-socket";
+
 var movementData = {
     	action: "move",
 }
@@ -33,11 +35,13 @@ Player.prototype.thrust = function(speed){
 };
 
 Player.prototype.updatePosition = function(data){
-	console.log("Got updated data for player: " + this.id);
-	console.log("I've got this data: ", this.obj.body.x, this.obj.body.y);
-	console.log("Reel Data: ", data);
+	// console.log("Got updated data for player: " + this.id);
+	// console.log("I've got this data: ", this.obj.body.x, this.obj.body.y);
+	// console.log("Reel Data: ", data);
 
-	
+	this.obj.body.x = data.x;	
+	this.obj.body.y = data.y;	
+	this.obj.body.angle = data.angle;	
 }
 
 function addPlayerServer(){
@@ -67,7 +71,7 @@ function getPlayerById(id) {
 }
 
 function openConn () {
- 	connection = new WebSocket('ws://localhost:3000/server-socket');
+ 	connection = new WebSocket(host);
 
 	 // When the connection is open, send some data to the server
 	connection.onopen = function () {
@@ -225,31 +229,35 @@ function update() {
 	    if (cursors.left.isDown)
 	    {
 
-	       currPlayer.obj.body.rotateLeft(100);
+	        movementData.direction = "left";
+	       // currPlayer.obj.body.rotateLeft(100);
 	    }
 	    else if (cursors.right.isDown)
 	    {
-	      currPlayer.obj.body.rotateRight(100);
+
+	      movementData.direction = "right";
+	      // currPlayer.obj.body.rotateRight(100);
 	    }
 	    else
 	    {
 	    
-	       currPlayer.obj.body.setZeroRotation();
-	    
+	        movementData.direction = "stop";
+	       // currPlayer.obj.body.setZeroRotation();
 	    }
 
 	    if (cursors.up.isDown){
-	        currPlayer.obj.body.thrust(400);
+	        // currPlayer.obj.body.thrust(400);
 	        movementData.direction = "forward";
-	        // console.log(movementData)
-	        connection.send(JSON.stringify(movementData));
 	    }
 	    else if (cursors.down.isDown)
 	    {
 	    
-	        currPlayer.obj.body.reverse(400);
+	        movementData.direction = "reverse";
+	        // currPlayer.obj.body.reverse(400);
 	    }
 
+	    connection.send(JSON.stringify(movementData));
+    	
     	// console.log(currPlayer.obj.body.force.destination);
     }catch(e){
     	console.log(e.message);
