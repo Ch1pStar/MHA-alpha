@@ -11,6 +11,7 @@ var game;
 var maxLag = 0;
 var maxYDiff = 0;
 var token;
+var someTiles;
 
 var host = "ws://"+window.location.hostname+":3000/server-socket";
 
@@ -42,6 +43,14 @@ Player.prototype.updatePosition = function(data){
 	this.obj.body.x = data.x;	
 	this.obj.body.y = data.y;	
 	this.obj.body.angle = data.angle;	
+	this.obj.angle = data.angle;	
+	this.obj.body.data.angle = data.p2Angle;
+
+	// this.obj.body.data.force[0] = data.force[0];
+	// this.obj.body.data.force[1] = data.force[1];
+	// this.obj.body.data.angularVelocity = data.angularVelocity;
+
+	// console.log(data.force);
 }
 
 function addPlayerServer(){
@@ -75,7 +84,8 @@ function openConn () {
 
 	 // When the connection is open, send some data to the server
 	connection.onopen = function () {
-		game = new Phaser.Game(800, 600, Phaser.AUTO, 'phaser-example', { preload: preload, create: create, update: update, render: render });
+		game = new Phaser.Game(800, 600, Phaser.AUTO, 'phaser-example', { preload: preload, create: create, update: update, render: render, forceSetTimeOut: true });
+		Phaser.RequestAnimationFrame(game, true);
 	};
 
 	// Log errors
@@ -113,7 +123,7 @@ function openConn () {
 				loadExistingPlayers(parsedData.players);
 				break;
 			case "updatePlayers":
-				console.log('updatePlayers\n');
+				// console.log('updatePlayers\n');
 				for (var i = 0; i < parsedData.players.length; i++) {
 					var pData = parsedData.players[i];
 					if(pData.id == currPlayer.id){
@@ -181,7 +191,9 @@ function create() {
     map.addTilesetImage('tiles2');
     
     layer = map.createLayer('Tile Layer 1');
+    layer2 = map.createLayer('Tile Layer 2');
 
+    layer2.resizeWorld();
     layer.resizeWorld();
 
     //  Set the tiles for collision.
@@ -191,7 +203,7 @@ function create() {
     //  Convert the tilemap layer into bodies. Only tiles that collide (see above) are created.
     //  This call returns an array of body objects which you can perform addition actions on if
     //  required. There is also a parameter to control optimising the map build.
-    game.physics.p2.convertTilemap(map, layer);
+    someTiles = game.physics.p2.convertTilemap(map, layer);
 
 
     connection.send(JSON.stringify({action:'ping'})); // Send the message 'Ping' to the server
@@ -223,7 +235,6 @@ function create() {
 
 
 function update() {
-
 
     try{
 	    if (cursors.left.isDown)

@@ -26,7 +26,6 @@ var players = [];
 // This is done using a fixed time step size.
 var timeStep = 1 / 60; // seconds
 
-
 var wss = new WebSocketServer({server: server});
 wss.on('connection', function(ws) {
 
@@ -48,7 +47,7 @@ wss.on('connection', function(ws) {
 	  			addPlayer(ws);
 	  			break;
 			case "move":
-				console.log("RECIEVED TOKEN: ", parsedData.token);
+				// console.log("RECIEVED TOKEN: ", parsedData.token);
 	  			updatePlayerPosition(parsedData.direction, parsedData.token);
 	  			break;
 	  		default:
@@ -68,8 +67,8 @@ setInterval(function(){
 	// tp.rotateReverse(400);
 
     // The step method moves the bodies forward in time.
-    world.step(timeStep);
-
+    // 
+   
     var parsedPlayers = [];
 	for (var i = 0; i < players.length; i++) {
 		parsedPlayers[i] = new TransferObject(players[i]);
@@ -81,14 +80,30 @@ setInterval(function(){
 	}
 	broadcastData(data);
 
+
     // Print the circle position to console.
     // Could be replaced by a render call.
     
-    // console.log("Player position x: " + tp.body.position[0] + " y: " + tp.body.position[1]);
+    try{
+	    player = players[0];
+	    // console.log("Player position x: " + player.body.position[0] + " y: " + player.body.position[1]+" angle: " + player.body.angle);
+	}catch(e){
+		console.log(e.message);
+	}
 
    // console.log(tp.body.angle);
 
 }, 1000 * timeStep);
+
+
+setInterval(function(){
+
+
+
+    world.step(timeStep);
+    
+}, 1000 * timeStep);
+
 
 function updatePlayerPosition(direction, token) {
 	var p = players.filter(function(e){
@@ -212,7 +227,7 @@ Player = function(ws){
 Player.prototype = {
 
 	thrust: function(speed){
-     	var magnitude = this.pxmi(speed);
+     	var magnitude = -speed;
         var angle = this.body.angle + Math.PI / 2;
 		
 
@@ -220,19 +235,17 @@ Player.prototype = {
 		// process.exit(1);
 
 
-        this.force[0] += (magnitude * Math.cos(angle));
-        this.force[1] += (magnitude * Math.sin(angle));
+        // this.force[0] += (magnitude * Math.cos(angle));
+        // this.force[1] += (magnitude * Math.sin(angle));
 
-        this.body.force[0] = this.force[0]
-        this.body.force[1] = this.force[1];
-
-        // console.log("Movement stuff: ", this.body.force[0], this.body.force[1]);
+        this.body.force[0] += Math.round(magnitude * Math.cos(angle));
+        this.body.force[1] += Math.round(magnitude * Math.sin(angle));
 
 	},
 
 	reverse: function (speed) {
 
-        var magnitude = this.pxmi(speed);
+        var magnitude = -speed;
         var angle = this.body.angle + Math.PI / 2;
         
 
@@ -242,8 +255,8 @@ Player.prototype = {
         // this.body.force[0] = this.force[0]
         // this.body.force[1] = this.force[1];
         
-        this.body.force[0] += (magnitude * Math.cos(angle));
-        this.body.force[1] += (magnitude * Math.sin(angle));
+        this.body.force[0] -= (magnitude * Math.cos(angle));
+        this.body.force[1] -= (magnitude * Math.sin(angle));
 
     },
 
@@ -296,6 +309,36 @@ Player.prototype = {
 
         return v * 0.05;
 
+    },
+
+    /**
+    * Convert p2 physics value (meters) to pixel scale.
+    * By default Phaser uses a scale of 20px per meter.
+    * If you need to modify this you can over-ride these functions via the Physics Configuration object.
+    *
+    * @method Phaser.Physics.P2#mpx
+    * @param {number} v - The value to convert.
+    * @return {number} The scaled value.
+    */
+    mpx: function (v) {
+
+        return v *= 20;
+
+    },
+
+    /**
+    * Convert p2 physics value (meters) to pixel scale and inverses it.
+    * By default Phaser uses a scale of 20px per meter.
+    * If you need to modify this you can over-ride these functions via the Physics Configuration object.
+    *
+    * @method Phaser.Physics.P2#mpxi
+    * @param {number} v - The value to convert.
+    * @return {number} The scaled value.
+    */
+    mpxi: function (v) {
+
+        return v *= -20;
+
     }
 };
 
@@ -303,8 +346,13 @@ Player.prototype = {
 function TransferObject(obj) {
 	this.x = obj.body.position[0];
 	this.y = obj.body.position[1];
-	this.angle = obj.body.angle;
+	this.angle = obj.mpx(obj.body.angle);
+	this.p2Angle = obj.body.angle;
 	this.id = obj.id;
+	this.force = [obj.body.force[0], obj.body.force[1]];
+	this.angularVelocity = obj.body.angularVelocity;
+
+	// console.log(this.force);
 }
 
 
@@ -317,4 +365,11 @@ var token = function() {
 };
 
 
-var tp = new Player(null);
+// var tp = new Player(null);
+
+
+
+//always wrap input angle to -PI..PI
+
+
+
