@@ -2,6 +2,7 @@
 var debug = require('debug')('MHA-new');
 var app = require('../app');
 var WebSocketServer = require('ws').Server;
+var http = require('http');
 
 app.set('port', process.env.PORT || 3000);
 
@@ -14,12 +15,19 @@ var ws = require('ws');
 
 // Create a World
 var world = new p2.World({
-    doProfiling:true,                    // Enable stats
-    gravity : [0,0],                   // Set gravity to -10 in y direction
-    broadphase : new p2.SAPBroadphase(), // Broadphase algorithm
-});
-
+	    doProfiling:true,                    // Enable stats
+	    gravity : [0,0],                   // Set gravity to -10 in y direction
+	    broadphase : new p2.SAPBroadphase(), // Broadphase algorithm
+	});
+var map;
+var mapData = [];
 var players = [];
+var options = {
+	host: 'localhost',
+	port: 3000,
+	path: '/simple_assets/tellmeursecrets.json',
+	method: 'GET'
+};
 
 // To get the trajectories of the bodies,
 // we must step the world forward in time.
@@ -29,16 +37,20 @@ var timeStep = 1 / 60; // seconds
 var wss = new WebSocketServer({server: server});
 wss.on('connection', function(ws) {
 
+	ws.send(JSON.stringify({action: 'init',mapUrl: options.path}));
 	console.log("length: ", players.length);
 
 	ws.on('message', function(e){
-	  	console.log(e);
+	  	// console.log(e);
 
 	  	var parsedData = JSON.parse(e);
 
-	  	console.log(parsedData.action);
+	  	// console.log(parsedData.action);
 
 	  	switch(parsedData.action){
+	  		case "ms":
+	  			ws.send(JSON.stringify({action:"ms"}));
+	  			break;	
 	  		case "ping":
 	  			console.log('Pong')
 				sendExistingPlayers(ws);
@@ -59,50 +71,97 @@ wss.on('connection', function(ws) {
 });
 
 
-setInterval(function(){
 
-	// tp.rotateLeft(400);
-	// tp.rotateRight(400);
-	// tp.rotateThrust(400);
-	// tp.rotateReverse(400);
+var req = http.request(options, function(res) {
 
-    // The step method moves the bodies forward in time.
-    // 
-   
-    var parsedPlayers = [];
-	for (var i = 0; i < players.length; i++) {
-		parsedPlayers[i] = new TransferObject(players[i]);
-	};
+	res.setEncoding('utf8');		
+	res.on('data', function (chunk) {
+		map = JSON.parse(chunk);
+	});
 
-	var data = {
-		action: "updatePlayers",
-		players: parsedPlayers
-	}
-	broadcastData(data);
+	res.on('end', function(){
+		// console.log(JSON.stringify(map));
+		data = map.layers[0].data;
+		var tileWidth = map.tilewidth;
+		var tileHeight = map.tileheight;
+		var mapWidth = map.layers[0].width; //tiles per row
+		var xIndex = tileWidth/2;
+		var yIndex = tileHeight/2;
+		for (var i = 0; i < data.length; ) {
+			var tile = data[i];
+			if(tile!=0){
+				console.log(i);
+				console.log("Found a tile at: %s %s", xIndex, yIndex);
+					var tileBody =  new p2.Body({ position: [xIndex, yIndex], mass: 0 });
+					var tileShape = new p2.Rectangle(tileWidth, tileHeight);
+					tileBody.addShape(tileShape);
+					world.addBody(tileBody);
+					mapData.push([xIndex, yIndex]);
+					console.log("Pos: %s %s", tileBody.position[0], tileBody.position[1]);
+			}
+			i++;
+			if(i>0 && i%20==0){
+				yIndex += tileHeight;
+				xIndex = tileWidth/2;
+			}else{
+				xIndex += tileWidth;
+			}
+		
+		};
+		startGameLoop();
+	});
+});
+
+req.on('error', function(e) {
+  console.log('problem with request: ' + e.message);
+});
+req.end();
+
+function startGameLoop() {
+
+	setInterval(function(){
+
+		// tp.rotateLeft(400);
+		// tp.rotateRight(400);
+		// tp.rotateThrust(400);
+		// tp.rotateReverse(400);
+
+	    // The step method moves the bodies forward in time.
+	    // 
+	   
+	    var parsedPlayers = [];
+		for (var i = 0; i < players.length; i++) {
+			parsedPlayers[i] = new TransferObject(players[i]);
+		};
+
+		var data = {
+			action: "updatePlayers",
+			players: parsedPlayers
+		}
+		broadcastData(data);
 
 
-    // Print the circle position to console.
-    // Could be replaced by a render call.
-    
-    try{
-	    player = players[0];
-	    // console.log("Player position x: " + player.body.position[0] + " y: " + player.body.position[1]+" angle: " + player.body.angle);
-	}catch(e){
-		console.log(e.message);
-	}
+	    // Print the circle position to console.
+	    // Could be replaced by a render call.
+	    
+	    try{
+		    player = players[0];
+		    // console.log("Player position x: " + player.body.position[0] + " y: " + player.body.position[1]+" angle: " + player.body.angle);
+		}catch(e){
+			console.log(e.message);
+		}
 
-   // console.log(tp.body.angle);
+	   // console.log(tp.body.angle);
 
-}, 1000 * timeStep);
-
-
-setInterval(function(){
+	}, 1000 * timeStep);
 
 
+	setInterval(function(){
+	    world.step(timeStep);
+	}, 1000 * timeStep);
+	
+}
 
-    world.step(timeStep);
-    
-}, 1000 * timeStep);
 
 
 function updatePlayerPosition(direction, token) {
@@ -154,6 +213,9 @@ function addPlayer(ws) {
 	data.action = "newPlayerConnected";
 	broadcastData(data);
 
+
+	broadcastData({action:'mapData',  mapData: mapData});
+
 }
 
 function sendExistingPlayers(ws){
@@ -200,13 +262,13 @@ function broadcastData(data) {
 }
 
 Player = function(ws){
-	this.body =  new p2.Body({ position: [Math.floor((Math.random() * 200) + 100), Math.floor((Math.random() * 200) + 100)], mass: 1 });
+	this.body =  new p2.Body({ position: [Math.floor((Math.random() * 200) + 100), Math.floor((Math.random() * 200) + 100)], mass: 5 });
 	this.force = [0,0];
 	this.id = this.body.id;
 	this.token = token();
 
 
-	var shape = new p2.Rectangle(50, 50);
+	var shape = new p2.Rectangle(29, 29);
 	this.body.addShape(shape);
 	world.addBody(this.body);
 	

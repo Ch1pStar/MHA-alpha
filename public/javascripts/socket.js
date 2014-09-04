@@ -12,6 +12,9 @@ var maxLag = 0;
 var maxYDiff = 0;
 var token;
 var someTiles;
+var serverTiles = [];
+var mapUrl = '';
+var lastTimeSend = (new Date()).getTime();
 
 var host = "ws://"+window.location.hostname+":3000/server-socket";
 
@@ -84,8 +87,7 @@ function openConn () {
 
 	 // When the connection is open, send some data to the server
 	connection.onopen = function () {
-		game = new Phaser.Game(800, 600, Phaser.AUTO, 'phaser-example', { preload: preload, create: create, update: update, render: render, forceSetTimeOut: true });
-		Phaser.RequestAnimationFrame(game, true);
+
 	};
 
 	// Log errors
@@ -101,6 +103,11 @@ function openConn () {
 	  	parsedData = JSON.parse(e.data);
 	  
 		switch(parsedData.action){
+			case "init":
+				game = new Phaser.Game(800, 600, Phaser.AUTO, 'phaser-example', { preload: preload, create: create, update: update, render: render, forceSetTimeOut: true });
+				Phaser.RequestAnimationFrame(game, true);
+				mapUrl = parsedData.mapUrl;
+				sendPing();
 			case "playerAdded":
 				console.log('playerAdded\n');
 				currPlayer = new Player(parsedData.playerData);
@@ -160,18 +167,40 @@ function openConn () {
 				purgePlayersServerResponse();
 				break;
 			*/
+			// case "mapData":
+			// 	for (var i = 0; i < parsedData.mapData.length; i++) {
+			// 		var d = parsedData.mapData[i];
+			// 		serverTiles.push(game.add.sprite(d[0], d[1], 'atile'));
+			// 	};
+			// 	console.log(parsedData);
+			// 	break;
+			case "ms":
+				logPing();
+				break;
 			default:
 				console.log('Unknown action\n');
+				console.log(e.data);
 	  	}
 	
 	};
 
 }
 
+function logPing() {
+	var receiveDate = (new Date()).getTime();
+	document.getElementById('ping').innerHTML = receiveDate - lastTimeSend - 300;
+	lastTimeSend = receiveDate;
+}
+
+setInterval(function(){
+	connection.send(JSON.stringify({action:'ms'})); 
+}, 300);
+
 function preload() {
 
-    game.load.tilemap('map', 'assets/tilemaps/maps/collision_test.json', null, Phaser.Tilemap.TILED_JSON);
-    game.load.image('ground_1x1', 'assets/tilemaps/tiles/ground_1x1.png');
+    game.load.tilemap('map', mapUrl, null, Phaser.Tilemap.TILED_JSON);
+    game.load.image('ground_1x1', 'simple_assets/ground_1x1.png');
+    game.load.image('atile', 'simple_assets/tile.png'	, 32, 32)
     game.load.image('walls_1x2', 'assets/tilemaps/tiles/walls_1x2.png');
     game.load.image('tiles2', 'assets/tilemaps/tiles/tiles2.png');
     game.load.image('ship', 'assets/sprites/thrust_ship2.png');
@@ -191,9 +220,6 @@ function create() {
     map.addTilesetImage('tiles2');
     
     layer = map.createLayer('Tile Layer 1');
-    layer2 = map.createLayer('Tile Layer 2');
-
-    layer2.resizeWorld();
     layer.resizeWorld();
 
     //  Set the tiles for collision.
@@ -204,7 +230,6 @@ function create() {
     //  This call returns an array of body objects which you can perform addition actions on if
     //  required. There is also a parameter to control optimising the map build.
     someTiles = game.physics.p2.convertTilemap(map, layer);
-
 
     connection.send(JSON.stringify({action:'ping'})); // Send the message 'Ping' to the server
     
