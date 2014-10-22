@@ -6,7 +6,9 @@ var players = [];
 var currPlayer;
 var map;
 var layer;
+var walls;
 var cursors;
+var mouse;
 var game;
 var maxLag = 0;
 var maxYDiff = 0;
@@ -15,23 +17,69 @@ var someTiles;
 var serverTiles = [];
 var mapUrl = '';
 var lastTimeSend = (new Date()).getTime();
-
+var pathLines = [];
 var host = "ws://"+window.location.hostname+":3000/server-socket";
 
 var movementData = {
-    	action: "move",
+    	action : "move",
 }
 
-Player = function(data){
+var cursorDownData = {
+	action : "cursor_down"
+};
+
+var towers = [];
+
+Player = function(data, isCurrPlayer){
+	if(typeof isCurrPlayer === 'undefined')
+		isCurrPlayer = false;
+
 	console.log("Player data...",data);
-	this.obj = game.add.sprite(data.x, data.y, 'ship');
+	if(isCurrPlayer){
+		this.obj = game.add.sprite(data.x, data.y, 'ptile');
+	}else{
+		this.obj = game.add.sprite(data.x, data.y, 'atile');
+	}
+	this.obj.inputEnabled = true;
 	this.id = data.id;
+	this.health = data.health;
+
+	this.selected = false;
 	
 	// console.log(data.id);
 	// console.log(this.obj);
    
     game.physics.p2.enable(this.obj);
 	// this.obj.body.setZeroRotation();
+};
+
+Tower = function(data){
+
+	console.log(1231231312312);
+	console.log("Tower data... %s",data);
+	
+	this.obj = game.add.sprite(data.x, data.y, 'tower');
+	
+	this.obj.inputEnabled = true;
+	this.id = data.id;
+
+	this.selected = false;
+
+	this.projectiles = [];
+	
+	// console.log(data.id);
+	// console.log(this.obj);
+   
+    game.physics.p2.enable(this.obj);
+	this.obj.body.static = true;
+	// this.obj.body.setZeroRotation();
+	
+
+	var tmpLine = game.add.graphics(0,0);  //init rect
+	tmpLine.lineStyle(2, 0xFFFFFF, 1); // width, color (0x0000FF), alpha (0 -> 1) // required settings
+	tmpLine.beginFill(0xFFFF0B, 0) // color (0xFFFF0B), alpha (0 -> 1) // required settings
+	tmpLine.drawCircle(this.obj.body.x, this.obj.body.y, 150); // x, y, radius
+
 };
 
 Player.prototype.thrust = function(speed){
@@ -56,6 +104,22 @@ Player.prototype.updatePosition = function(data){
 	// console.log(data.force);
 }
 
+Player.prototype.drawPathToPoint = function(path){
+	for(var pathIndex in path){
+		var pathItem = path[pathIndex];
+		var pathItemX = parseInt(pathItem[0]*map.tileWidth);
+		var pathItemY = parseInt(pathItem[1]*map.tileHeight);
+		
+		var tmpLine = game.add.graphics(0,0);  //init rect
+		tmpLine.lineStyle(2, 0xFFFFFF, 1); // width, color (0x0000FF), alpha (0 -> 1) // required settings
+		tmpLine.beginFill(0xFFFF0B, 1) // color (0xFFFF0B), alpha (0 -> 1) // required settings
+		tmpLine.drawCircle(pathItemX+18.5, pathItemY+18.5, 2); // x, y, radius
+
+		pathLines.push(tmpLine);
+		console.log(pathItemX, pathItemY);
+	}
+}
+
 function addPlayerServer(){
     data = {
     	action: 'createPlayer'
@@ -71,6 +135,14 @@ function loadExistingPlayers(playersData) {
 	};
 }
 
+function loadTowers(towersInfo) {
+	for (var i = 0; i <= towersInfo.length - 1; i++) {
+		var data = towersInfo[i];
+		var tower = new Tower(data);
+		towers.push(tower);
+	};
+}
+
 
 function closeConn () {
 	connection.close();
@@ -78,6 +150,12 @@ function closeConn () {
 
 function getPlayerById(id) {
 	return players.filter(function(e){
+		return e.id == id;
+	});
+}
+
+function getTowerById(id) {
+	return towers.filter(function(e){
 		return e.id == id;
 	});
 }
@@ -104,22 +182,24 @@ function openConn () {
 	  
 		switch(parsedData.action){
 			case "init":
-				game = new Phaser.Game(800, 600, Phaser.AUTO, 'phaser-example', { preload: preload, create: create, update: update, render: render, forceSetTimeOut: true });
+				game = new Phaser.Game(($(window).width()-100), 640, Phaser.AUTO, 'phaser-example', { preload: preload, create: create, update: update, render: render, forceSetTimeOut: true });
 				Phaser.RequestAnimationFrame(game, true);
 				mapUrl = parsedData.mapUrl;
-				sendPing();
+				break;
 			case "playerAdded":
 				console.log('playerAdded\n');
-				currPlayer = new Player(parsedData.playerData);
+				currPlayer = new Player(parsedData.playerData, true);
+				currPlayer.selected = false;
 				token = parsedData.token;
 				movementData.token = token;
+				cursorDownData.token = token;
     			game.camera.follow(currPlayer.obj);
 				break;
 			case "newPlayerConnected":
 				console.log('newPlayerConnected');
 				if(parsedData.playerData.id != currPlayer.id){
 					console.log("...yup i was right\n");
-					var player = new Player(parsedData.playerData);
+					var player = new Player(parsedData.playerData, false);
 					players.push(player);
 				}else{
 					console.log("nvm...it was just me\n");
@@ -129,18 +209,43 @@ function openConn () {
 				console.log('loadExistingPlayers\n');
 				loadExistingPlayers(parsedData.players);
 				break;
-			case "updatePlayers":
+			case "towers-info":
+				console.log('loadTowers\n');
+				loadTowers(parsedData.towers);
+				break;
+			case "updateState":
 				// console.log('updatePlayers\n');
-				for (var i = 0; i < parsedData.players.length; i++) {
-					var pData = parsedData.players[i];
-					if(pData.id == currPlayer.id){
-						currPlayer.updatePosition(pData);
-					}else{
-						var p = getPlayerById(pData.id);
-						p = p[0];
-						p.updatePosition(pData);					
+				
+				if(typeof parsedData.players !== 'undefined' && parsedData.players.length > 0){
+
+					for (var i = 0; i < parsedData.players.length; i++) {
+						var pData = parsedData.players[i];
+						if(typeof currPlayer !== 'undefined' && pData.id == currPlayer.id){
+							currPlayer.updatePosition(pData);
+							currPlayer.selected = pData.selected;
+							currPlayer.health = pData.health;
+							logPosition();
+						}else{
+							var p = getPlayerById(pData.id);
+							p = p[0];
+							if(typeof p !== 'undefined'){
+								p.updatePosition(pData);					
+							}
+						}
 					}
-				};
+				}
+
+				if(typeof parsedData.towers !== 'undefined' && parsedData.towers.length > 0){
+					for (var i = 0; i < parsedData.towers.length; i++) {
+						var tData = parsedData.towers[i];
+						var t = getTowerById(tData.id);
+						t = t[0];
+						if(typeof t !== 'undefined'){
+							// console.log("Got info for tower %s", t.id);
+						}
+
+					};
+				}
 
 				/*
 				if(parsedData.player.id == currPlayer.id){
@@ -170,16 +275,27 @@ function openConn () {
 			// case "mapData":
 			// 	for (var i = 0; i < parsedData.mapData.length; i++) {
 			// 		var d = parsedData.mapData[i];
-			// 		serverTiles.push(game.add.sprite(d[0], d[1], 'atile'));
+			// 		serverTiles.push(game.add.sprite(d[0]-16, d[1]-16, 'atile'));
 			// 	};
-			// 	console.log(parsedData);
 			// 	break;
+			case "path-data":
+				currPlayer.drawPathToPoint(parsedData.path);
+				break;
+			case "path-finished":
+				setTimeout(function(){
+					for(var i=0; i< pathLines.length; i++){
+						var lineItem = pathLines[i];
+						pathLines.splice(i,1);
+						lineItem.destroy();
+					}
+				},0);
+				break;
 			case "ms":
 				logPing();
 				break;
 			default:
-				console.log('Unknown action\n');
-				console.log(e.data);
+				console.log('Unknown action %s\n', parsedData.action);
+				// console.log(e.data);
 	  	}
 	
 	};
@@ -192,18 +308,36 @@ function logPing() {
 	lastTimeSend = receiveDate;
 }
 
+function logPosition() {
+	$('#latt').text(currPlayer.obj.body.x);
+	$('#lng').text(currPlayer.obj.body.y);
+	$('#angle').text(currPlayer.obj.body.angle);
+	$('#unit_selected').text(currPlayer.selected);
+	$('#unit_health').text(currPlayer.health);
+}
+
 setInterval(function(){
-	connection.send(JSON.stringify({action:'ms'})); 
+	try{
+		connection.send(JSON.stringify({action:'ms'})); 
+	}catch(e){
+		console.log("Log ping error: ", e.message);
+	}
 }, 300);
 
 function preload() {
 
+	console.log(mapUrl);
     game.load.tilemap('map', mapUrl, null, Phaser.Tilemap.TILED_JSON);
     game.load.image('ground_1x1', 'simple_assets/ground_1x1.png');
-    game.load.image('atile', 'simple_assets/tile.png'	, 32, 32)
+    game.load.image('Grass', 'simple_assets/FeThD.png');
+    game.load.image('Water', 'simple_assets/water_1x1.png');
+    game.load.image('atile', 'simple_assets/tile.png'	, 32, 32);
+    game.load.image('ptile', 'simple_assets/tile_player.png', 32, 32);
+    game.load.image('tower', 'simple_assets/tower.png'	, 32, 64);
     game.load.image('walls_1x2', 'assets/tilemaps/tiles/walls_1x2.png');
     game.load.image('tiles2', 'assets/tilemaps/tiles/tiles2.png');
-    game.load.image('ship', 'assets/sprites/thrust_ship2.png');
+    // game.load.image('ship', 'assets/sprites/thrust_ship2.png');
+    game.load.image('guy', 'simple_assets/guy.png');
 
 }
 
@@ -215,12 +349,16 @@ function create() {
 
     map = game.add.tilemap('map');
 
+    map.addTilesetImage('Grass');
+    map.addTilesetImage('Water');
     map.addTilesetImage('ground_1x1');
-    map.addTilesetImage('walls_1x2');
     map.addTilesetImage('tiles2');
     
-    layer = map.createLayer('Tile Layer 1');
+    layer = map.createLayer('BG');
     layer.resizeWorld();
+
+    walls = map.createLayer('Tile Layer 1');
+    walls.resizeWorld();
 
     //  Set the tiles for collision.
     //  Do this BEFORE generating the p2 bodies below.
@@ -229,7 +367,7 @@ function create() {
     //  Convert the tilemap layer into bodies. Only tiles that collide (see above) are created.
     //  This call returns an array of body objects which you can perform addition actions on if
     //  required. There is also a parameter to control optimising the map build.
-    someTiles = game.physics.p2.convertTilemap(map, layer);
+    // someTiles = game.physics.p2.convertTilemap(map, walls);
 
     connection.send(JSON.stringify({action:'ping'})); // Send the message 'Ping' to the server
     
@@ -253,50 +391,50 @@ function create() {
     // ship.body.collideWorldBounds = false;
 
     cursors = game.input.keyboard.createCursorKeys();
-
-
+	game.input.onDown.add(mouseClickCallback, this);
 }
 
+function mouseClickCallback(pointer) {
+	try{
+		cursorDownData.point = [
+			pointer.worldX,
+			pointer.worldY
+		];
+	    connection.send(JSON.stringify(cursorDownData));
+	}catch(e){
+		console.log("Mouse click error: ", e.message);
+	}
+}
 
 
 function update() {
 
     try{
-	    if (cursors.left.isDown)
-	    {
 
-	        movementData.direction = "left";
-	       // currPlayer.obj.body.rotateLeft(100);
+	    if (cursors.left.isDown){
+	    	movementData.rotation = "left";
 	    }
-	    else if (cursors.right.isDown)
-	    {
-
-	      movementData.direction = "right";
-	      // currPlayer.obj.body.rotateRight(100);
+	    else if (cursors.right.isDown){
+	      movementData.rotation = "right";
 	    }
-	    else
-	    {
-	    
-	        movementData.direction = "stop";
-	       // currPlayer.obj.body.setZeroRotation();
+	    else{
+	        movementData.rotation = "stop";
 	    }
 
 	    if (cursors.up.isDown){
-	        // currPlayer.obj.body.thrust(400);
-	        movementData.direction = "forward";
+	    	movementData.direction = "forward";
 	    }
-	    else if (cursors.down.isDown)
-	    {
-	    
+	    else if (cursors.down.isDown){
 	        movementData.direction = "reverse";
-	        // currPlayer.obj.body.reverse(400);
+	    }else{
+    		movementData.direction = "stop";
 	    }
 
 	    connection.send(JSON.stringify(movementData));
     	
     	// console.log(currPlayer.obj.body.force.destination);
     }catch(e){
-    	console.log(e.message);
+    	console.log("Keyboard direction error: ", e.message);
     }
 
 }

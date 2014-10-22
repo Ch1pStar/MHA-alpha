@@ -12,20 +12,31 @@ var server = app.listen(app.get('port'), function() {
 
 var p2 = require('p2');
 var ws = require('ws');
+var pf = require('pathfinding');
 
 // Create a World
 var world = new p2.World({
 	    doProfiling:true,                    // Enable stats
-	    gravity : [0,0],                   // Set gravity to -10 in y direction
+	    gravity : [0,0],
 	    broadphase : new p2.SAPBroadphase(), // Broadphase algorithm
 	});
 var map;
 var mapData = [];
 var players = [];
+var grid;
+var towers;
+
+var messageQueue = [];
+
+var PLAYER_COLLISION_GROUP = Math.pow(2,0),
+    TOWER_COLLISION_GROUP =  Math.pow(2,1);
+
+
+//TODO ADD CONFIG FILES
 var options = {
 	host: 'localhost',
 	port: 3000,
-	path: '/simple_assets/tellmeursecrets.json',
+	path: '/simple_assets/big_map.json',
 	method: 'GET'
 };
 
@@ -52,7 +63,7 @@ wss.on('connection', function(ws) {
 	  			ws.send(JSON.stringify({action:"ms"}));
 	  			break;	
 	  		case "ping":
-	  			console.log('Pong')
+	  			console.log('Pong - %s', ws.upgradeReq.connection.remoteAddress);
 				sendExistingPlayers(ws);
 	  			break;
 	  		case "createPlayer":
@@ -60,17 +71,17 @@ wss.on('connection', function(ws) {
 	  			break;
 			case "move":
 				// console.log("RECIEVED TOKEN: ", parsedData.token);
-	  			updatePlayerPosition(parsedData.direction, parsedData.token);
+	  			updatePlayerPosition(parsedData.direction, parsedData.rotation, parsedData.token);
 	  			break;
+			case "cursor_down":
+				handleCursorDownInput(parsedData.point, parsedData.token, ws);
+				break;
 	  		default:
-	  			console.log('Unknown action\n');
-
+	  			console.log('Unknown action\n', parsedData.action);
 	  	}
 	  	//console.log(players);
 	});
 });
-
-
 
 var req = http.request(options, function(res) {
 
@@ -81,26 +92,30 @@ var req = http.request(options, function(res) {
 
 	res.on('end', function(){
 		// console.log(JSON.stringify(map));
-		data = map.layers[0].data;
+		collisionIndex = map.layers.length-1;
+		data = map.layers[collisionIndex].data;
 		var tileWidth = map.tilewidth;
 		var tileHeight = map.tileheight;
-		var mapWidth = map.layers[0].width; //tiles per row
+		grid = new pf.Grid(map.width, map.height);
+		var mapWidth = map.layers[collisionIndex].width; //tiles per row
 		var xIndex = tileWidth/2;
 		var yIndex = tileHeight/2;
 		for (var i = 0; i < data.length; ) {
 			var tile = data[i];
 			if(tile!=0){
-				console.log(i);
+				// console.log(i);
 				console.log("Found a tile at: %s %s", xIndex, yIndex);
-					var tileBody =  new p2.Body({ position: [xIndex, yIndex], mass: 0 });
-					var tileShape = new p2.Rectangle(tileWidth, tileHeight);
-					tileBody.addShape(tileShape);
-					world.addBody(tileBody);
-					mapData.push([xIndex, yIndex]);
-					console.log("Pos: %s %s", tileBody.position[0], tileBody.position[1]);
+				var tileBody =  new p2.Body({ position: [xIndex, yIndex], mass: 0 });
+				var tileShape = new p2.Rectangle(tileWidth, tileHeight);
+				tileBody.addShape(tileShape);
+				world.addBody(tileBody);
+				mapData.push([xIndex, yIndex]);
+				grid.setWalkableAt(parseInt(xIndex/tileWidth), parseInt(yIndex/tileHeight), false);
+				console.log("Pos: %s %s", tileBody.position[0], tileBody.position[1]);
+				console.log("Grid x:%s y:%s ", parseInt(xIndex/tileWidth), parseInt(yIndex/tileWidth));
 			}
 			i++;
-			if(i>0 && i%20==0){
+			if(i>0 && i%map.width==0){
 				yIndex += tileHeight;
 				xIndex = tileWidth/2;
 			}else{
@@ -108,6 +123,100 @@ var req = http.request(options, function(res) {
 			}
 		
 		};
+		towers = [new Tower(19, 8, 0, 5, 300), new Tower(29, 18, 1, 20, 1000)];
+		world.on('impact', function(e){
+			// console.log(e);
+			console.log("Imapct event for objects: %s, %s", e.bodyA.id, e.bodyB.id);
+			for (var i = 0; i < towers.length; i++) {
+				var t = towers[i];
+				if(e.bodyA.id == t.id || e.bodyB.id == t.id){
+					console.log("Tower was involved in impact");
+					var tHit = true;
+				}
+			};
+
+			for (var i = 0; i < players.length; i++) {
+				var t = players[i];
+				if(e.bodyA.id == t.id || e.bodyB.id == t.id){
+					console.log("Player %s was involved in impact", t.id);
+					var pHit = true;
+					var impactedPlayer = t;
+				}
+			};
+
+			if(tHit && pHit){
+				console.log("Player %s collided with tower", impactedPlayer.id);
+				impactedPlayer.removeHealth(10);
+			}
+
+		});
+		world.on('beginContact', function(e){
+			console.log("Begin contact -  %s(%s) %s(%s)", e.bodyA.id, e.shapeA.id, e.bodyB.id, e.shapeB.id);
+			for (var i = 0; i < players.length; i++) {
+				var p = players[i];
+				if(e.bodyA.id == p.id || e.bodyB.id == p.id){
+					console.log("Player %s(%s) was involved in impact", p.id, p.body.shapes[0].id);
+					var pHit = true;
+					var impactedPlayer = p;
+				}
+			};
+			for (var i = 0; i < towers.length; i++) {
+				var t = towers[i];
+				if(t.rangeSensorBody.id == e.bodyA.id || t.rangeSensorBody.id == e.bodyB.id){
+					if(pHit){
+						t.unitsInRange.push(impactedPlayer);
+					}
+				}
+			};
+		});
+
+		world.on('endContact', function(e){
+			console.log("End contact - %s(%s) %s(%s)", e.bodyA.id, e.shapeA.id, e.bodyB.id, e.shapeB.id);
+			for (var i = 0; i < towers.length; i++) {
+				var t = towers[i];
+				if(t.rangeSensorBody == e.bodyA || t.rangeSensorBody == e.bodyB){
+					for (var j = 0; j < players.length; j++) {
+						var p = players[j];
+						if(p.body == e.bodyA || p.body == e.bodyB){
+							console.log("Unit out of tower range");
+							t.unitsInRange.splice(t.unitsInRange.indexOf(p),1);
+						}
+					};					
+				
+				}
+			};
+		});
+
+
+		world.on('postStep', function(){
+			var parsedPlayers = [];
+			for (var i = 0; i < players.length; i++) {
+				parsedPlayers[i] = new TransferObject(players[i]);
+			}
+
+			var parsedTowers = [];
+			for (var i = 0; i < towers.length; i++) {
+				parsedTowers[i] = new TransferObject(towers[i]);
+			}
+			var data = {
+				action: "updateState",
+				players: parsedPlayers,
+				towers: parsedTowers
+			};
+			broadcastData(data);
+			
+			handleMessageQueue();
+
+			// try{
+			//     player = players[0];
+			//     console.log(player.body.velocity[0], player.body.velocity[1]);
+			//     console.log("Player position x: " + player.body.position[0] + " y: " + player.body.position[1]+" angle: " + player.body.angle);
+			// }catch(e){
+			// 	console.log(e.message);
+			// }
+
+		})
+
 		startGameLoop();
 	});
 });
@@ -118,53 +227,161 @@ req.on('error', function(e) {
 req.end();
 
 function startGameLoop() {
-
 	setInterval(function(){
-
-		// tp.rotateLeft(400);
-		// tp.rotateRight(400);
-		// tp.rotateThrust(400);
-		// tp.rotateReverse(400);
-
-	    // The step method moves the bodies forward in time.
-	    // 
-	   
-	    var parsedPlayers = [];
-		for (var i = 0; i < players.length; i++) {
-			parsedPlayers[i] = new TransferObject(players[i]);
-		};
-
-		var data = {
-			action: "updatePlayers",
-			players: parsedPlayers
+		// var hrTime = process.hrtime();
+		// var currTimeMs = Math.round(hrTime[0] * 1000000 + hrTime[1] / 1000); 
+		var currTimeMs = Date.now();
+		for (var i = 0; i < towers.length; i++) {
+			var t = towers[i];
+			switch(t.type){
+				case 0:
+					if(t.unitsInRange.length>0){
+						if( (currTimeMs - t.timeOfLastAttack) > t.attackSpeed){
+							t.timeOfLastAttack = currTimeMs;
+							for (var i = 0; i < t.unitsInRange.length; i++) {
+								var p = t.unitsInRange[i];
+								t.dealDamage(p);
+							}
+						}
+					}
+				break;
+				case 1:
+					if(t.unitsInRange.length>0){
+						var p = t.unitsInRange[0];
+						if( (currTimeMs - t.timeOfLastAttack) > t.attackSpeed){
+							t.timeOfLastAttack = currTimeMs;
+							t.launchProjectile(p);
+						}
+					}
+				// default:
+				// 	console.log("Unknown tower type");
+			}
+		
+			if(t.projectiles.length > 0){
+				for (var i = 0; i < t.projectiles.length; i++) {
+					var projectile = t.projectiles[i];
+					projectile.moveTowardsTarget(100);
+					// console.log("Projectile %s with force %s %s", projectile.id, projectile.body.force.x, projectile.body.force.y);
+				};
+			}
 		}
-		broadcastData(data);
 
+		if(players.length > 0){
+			var updatedPlayers = [];
+			for (var i = 0; i < players.length; i++) {
+				var p = players[i];
+				if(p.path.length > 0){
+					if((currTimeMs - p.timeOfLastMovement) > p.movementSpeed){
+						p.timeOfLastMovement = currTimeMs;
+						var path = p.path;
+						// console.log("Player %s has %s steps to go", p.id, p.path.length);
+						p.stop();
+						var lastPathIndex = path.length-1;
+						p.body.position[0] = (path[lastPathIndex][0]*map.tilewidth)+map.tilewidth/2;
+						p.body.position[1] = (path[lastPathIndex][1]*map.tileheight)+map.tileheight/2;
+						
+						//updatedPlayers.push(new TransferObject(p));
+						
+						path.splice(-1, 1);
+						if (path.length == 0) {
+							messageQueue.push({client:p.ws, msg:{action:'path-finished'}})
+						}
 
-	    // Print the circle position to console.
-	    // Could be replaced by a render call.
+					}
+				}
+			}
+			
+			// if(updatedPlayers.length > 0){
+
+			// 	messageQueue.push({client:"broadcast", msg:{
+			// 		action: "updateState",
+			// 		players: updatedPlayers
+			// 	}});
+			// }
+		}
 	    
-	    try{
-		    player = players[0];
-		    // console.log("Player position x: " + player.body.position[0] + " y: " + player.body.position[1]+" angle: " + player.body.angle);
-		}catch(e){
-			console.log(e.message);
-		}
-
-	   // console.log(tp.body.angle);
-
-	}, 1000 * timeStep);
-
-
-	setInterval(function(){
 	    world.step(timeStep);
 	}, 1000 * timeStep);
-	
 }
 
+function handleCursorDownInput(point, token, ws) {
+	var p = players.filter(function(e){
+		return e.token == token;
+	});
+	var playerBodies = [];
+	var cursorTilePosition = [parseInt(point[0]/map.tilewidth), parseInt(point[1]/map.tileheight)];
+	var objectTilePosition;
+	try{
+		p = p[0];
 
+		if(p === undefined){
+			throw {message: "OBJECT WITH TOKEN : " + token +" NOT FOUND!"};
+		}
+		objectTilePosition = [parseInt(p.body.position[0]/map.tilewidth), parseInt(p.body.position[1]/map.tileheight)];
+		console.log("Cursor down input point %s(%s) for player %s, with coordinates %s %s", point, cursorTilePosition, p.id, p.body.position[0], p.body.position[1]);
 
-function updatePlayerPosition(direction, token) {
+		for(i in players){
+			playerBodies.push(players[i].body);
+		}
+		var clicked = world.hitTest(point, playerBodies);
+		if(clicked.length!=0){
+			for(var i in clicked){
+				var currClickedId = clicked[i].id;
+				console.log("Hit detected on object: %s", currClickedId);
+				if(currClickedId == p.id){
+					console.log("Owner click detected!");
+					if(!p.selected){
+						console.log("Unit selected");
+						p.body.force[0] = 0;
+						p.body.force[1] = 0;
+						p.body.angularVelocity = 0;
+						// p.body.angle = 0;
+						p.selected = true;
+					}
+				}
+			}
+		}else{
+			if(p.selected){
+				console.log("Unit released at position %s(%s)", point, cursorTilePosition);
+				var finder = new pf.AStarFinder({
+					allowDiagonal: true,
+					dontCrossCorners: true
+				});
+				var tmpGrid = grid.clone();
+				for(var i in playerBodies){
+					var playerBody = playerBodies[i];
+					if(playerBody.id != p.id){
+						var playerTilePosition = [parseInt(playerBody.position[0]/map.tilewidth), parseInt(playerBody.position[1]/map.tileheight)];
+						tmpGrid.setWalkableAt(playerTilePosition[0], playerTilePosition[1], false);
+					}
+				}
+				for (var i = 0; i < towers.length; i++) {
+					var towerBody = towers[i].body;
+					var towerTilePosition = [parseInt(towerBody.position[0]/map.tilewidth), parseInt(towerBody.position[1]/map.tileheight)];
+					tmpGrid.setWalkableAt(towerTilePosition[0], towerTilePosition[1], false);
+					tmpGrid.setWalkableAt(towerTilePosition[0], towerTilePosition[1]-1, false);
+				};
+				var path = finder.findPath(cursorTilePosition[0], cursorTilePosition[1], objectTilePosition[0], objectTilePosition[1], tmpGrid);
+
+				p.path = path;
+
+				// for(pathIndex in path){
+				// 	var pathItem = path[pathIndex];
+				// }
+
+				// p.body.position[0] = point[0];
+				// p.body.position[1] = point[1];
+				p.selected = false;
+
+				ws.send(JSON.stringify({action:'path-data',  path: path}));
+			}
+		}
+	}catch(e){
+		console.log("Handle cursor down input error: %s", e.message);
+	}
+}
+
+function updatePlayerPosition(direction, rotation, token) {
 	var p = players.filter(function(e){
 		return e.token == token;
 	});
@@ -172,30 +389,40 @@ function updatePlayerPosition(direction, token) {
 		p = p[0];
 
 		if(p === undefined){
-			throw "OBJECT WITH TOKEN :" + token +" NOT FOUND!";
+			throw {message: "OBJECT WITH TOKEN : " + token +" NOT FOUND!"};
 		}
-
-		switch(direction){
-			case "forward":
-				p.thrust(400);
-				break;
-			case "reverse":
-				p.reverse(400);
-				break;
+		switch(rotation){
 			case "left":
-				p.rotateLeft(100);
+				p.rotateLeft(200);
 				break;
 			case "right":
-				p.rotateRight(100);
+				p.rotateRight(200);
 				break;
 			case "stop":
 				p.setZeroRotation();
 				break;
 			default:
+				console.log("Unknown rotation");
+		}
+		
+		switch(direction){
+			case "forward":
+				p.thrust(600);
+				break;
+			case "reverse":
+				p.reverse(600);
+				break;
+			case "stop":
+				//NO INPUT, DO NOTHING
+				// console.log("No direction input(stop)");
+				// p.stop();
+				break;
+			default:
 				console.log("Unknown direction");
 		}
+
 	}catch(e){
-		console.log(e.message);
+		console.log("Update player position error: %s", e.message);
 	}
 }
 
@@ -213,9 +440,16 @@ function addPlayer(ws) {
 	data.action = "newPlayerConnected";
 	broadcastData(data);
 
+	ws.send(JSON.stringify({action:'mapData',  mapData: mapData}));
+	ws.send(JSON.stringify({action:'gridData',  gridData: grid.nodes}));
 
-	broadcastData({action:'mapData',  mapData: mapData});
+	var parsedTowers = [];
+	for (var i = 0; i < towers.length; i++) {
+		parsedTowers[i] = new TransferObject(towers[i]);
+	}
+	ws.send(JSON.stringify({action:"towers-info", towers: parsedTowers}));
 
+	// broadcastData({action:'mapData',  mapData: mapData});
 }
 
 function sendExistingPlayers(ws){
@@ -237,6 +471,11 @@ function removePlayer(id) {
 	var dp = players.filter(function(e){
 		return e.id == id;
 	});
+	console.log(dp);
+	if(typeof dp[0]!=='undefined'){
+		console.log(dp[0]);
+		world.removeBody(dp[0]);
+	}
 
 	players.splice(players.indexOf(dp),1);
 
@@ -261,14 +500,43 @@ function broadcastData(data) {
 	};
 }
 
+function handleMessageQueue() {
+	if(messageQueue.length > 0){
+		for (var i = 0; i < messageQueue.length; i++) {
+			var currMsg = messageQueue[i];
+			// console.log(currMsg);
+			if(currMsg.client == 'broadcast'){
+				broadcastData(currMsg.msg);
+			}else{
+				currMsg.client.send(JSON.stringify(currMsg.msg));
+			}
+		};
+	}
+	messageQueue = [];
+}
+
 Player = function(ws){
-	this.body =  new p2.Body({ position: [Math.floor((Math.random() * 200) + 100), Math.floor((Math.random() * 200) + 100)], mass: 5 });
+	// this.body =  new p2.Body({ position: [Math.floor((Math.random() * 200) + 100), Math.floor((Math.random() * 200) + 100)], mass: 5 });
+	this.body =  new p2.Body({ position: [64-16,64-16], mass: 5 });
 	this.force = [0,0];
 	this.id = this.body.id;
 	this.token = token();
+	this.selected = false;
+	this.health = 100;
+
+	this.path = [];
+
+	//The time it takes for the unit to move to the next tile
+	this.movementSpeed = 100;
+
+	this.timeOfLastMovement = 0;
 
 
-	var shape = new p2.Rectangle(29, 29);
+	var shape = new p2.Rectangle(32, 32);
+
+	// shape.collisionGroup = PLAYER_COLLISION_GROUP;
+	// shape.collisionMask = TOWER_COLLISION_GROUP | PLAYER_COLLISION_GROUP;
+	
 	this.body.addShape(shape);
 	world.addBody(this.body);
 	
@@ -286,20 +554,90 @@ Player = function(ws){
 	this.ws = ws;
 }
 
+Tower = function(x, y, type, damage, attackSpeed){
+	//TODO Add options object as single argument
+	
+	this.body =  new p2.Body({ position: [x*32-16,y*32-32], mass: 0 });
+	this.force = [0,0];
+	this.id = this.body.id;
+	this.selected = false;
+
+	this.timeOfLastAttack = 0;
+
+
+	if(typeof type == 'undefined'){
+		type = 0;
+	}
+	this.type = type;
+
+	if(typeof damage == 'undefined'){
+		damage = 0.1;
+	}
+	this.damage = damage;
+
+	if(typeof attackSpeed == 'undefined'){
+		attackSpeed = 1000;
+	}
+	//Time between each attack measured in ms - maybe change this later on
+	this.attackSpeed = attackSpeed;
+
+	var shape = new p2.Rectangle(32, 64);
+	
+	// shape.collisionGroup = TOWER_COLLISION_GROUP;
+	// shape.collisionMask = TOWER_COLLISION_GROUP | PLAYER_COLLISION_GROUP;
+	
+	this.body.addShape(shape);
+	world.addBody(this.body);
+	
+	this.rangeSensorShape = new p2.Circle(150);
+	this.rangeSensorShape.sensor = true; 
+	this.rangeSensorBody = new p2.Body({
+		position: this.body.position
+	});
+	this.rangeSensorBody.damping = 0;
+	this.rangeSensorBody.addShape(this.rangeSensorShape);
+	this.rangeSensorBody.active = false;
+	world.addBody(this.rangeSensorBody);
+
+	this.unitsInRange = [];
+	this.projectiles = [];
+}
+
+Projectile = function(owner, target){
+	this.owner = owner;
+	this.body =  new p2.Body({ position: [this.owner.body.position[0],this.owner.body.position[1]], mass: 1 });
+	this.id = this.body.id;
+
+	this.damage = this.owner.damage;
+	this.target = target;
+
+	var shape = new p2.Rectangle(8, 8);
+	this.body.addShape(shape);
+	world.addBody(this.body);
+	
+}
+
 Player.prototype = {
 
+	removeHealth: function(value){
+		if(this.health > 0){
+			if(this.health <= value){
+				this.health = 0;
+				console.log("Player %s has died and respawned with max health", this.id);
+				this.health = 100;
+			}else{
+				this.health -= value;
+			}
+		}else{
+			console.log("Player %s has died and respawned with max health", this.id);
+			this.health = 100;
+		}
+	},
+
 	thrust: function(speed){
-     	var magnitude = -speed;
+     	var magnitude = -speed*2;
         var angle = this.body.angle + Math.PI / 2;
-		
-
-		// console.log(magnitude,this.body.angle,angle);
-		// process.exit(1);
-
-
-        // this.force[0] += (magnitude * Math.cos(angle));
-        // this.force[1] += (magnitude * Math.sin(angle));
-
+		   
         this.body.force[0] += Math.round(magnitude * Math.cos(angle));
         this.body.force[1] += Math.round(magnitude * Math.sin(angle));
 
@@ -307,18 +645,11 @@ Player.prototype = {
 
 	reverse: function (speed) {
 
-        var magnitude = -speed;
+        var magnitude = -speed*2;
         var angle = this.body.angle + Math.PI / 2;
         
-
-        // REALLY FAST ACCELERATION
-        // this.force[0] -= (magnitude * Math.cos(angle));
-        // this.force[1] -= (magnitude * Math.sin(angle));
-        // this.body.force[0] = this.force[0]
-        // this.body.force[1] = this.force[1];
-        
-        this.body.force[0] -= (magnitude * Math.cos(angle));
-        this.body.force[1] -= (magnitude * Math.sin(angle));
+        this.body.force[0] -= Math.round(magnitude * Math.cos(angle));
+        this.body.force[1] -= Math.round(magnitude * Math.sin(angle));
 
     },
 
@@ -342,6 +673,11 @@ Player.prototype = {
 
         this.body.angularVelocity = this.pxm(speed);
 
+    },
+
+    stop: function(){
+    	this.body.velocity[0] = 0;
+    	this.body.velocity[1] = 0;
     },
 
 
@@ -404,6 +740,249 @@ Player.prototype = {
     }
 };
 
+Tower.prototype = {
+
+	launchProjectile: function(target){
+		console.log("Tower %s fired at unit %s", this.id, target.id);
+		var projectile = new Projectile(this, target);
+		this.projectiles.push(projectile);
+	},
+
+	dealDamage: function(unit){
+		unit.removeHealth(this.damage);
+	},
+
+	thrust: function(speed){
+     	var magnitude = -speed*2;
+        var angle = this.body.angle + Math.PI / 2;
+		   
+        this.body.force[0] += Math.round(magnitude * Math.cos(angle));
+        this.body.force[1] += Math.round(magnitude * Math.sin(angle));
+
+	},
+
+	reverse: function (speed) {
+
+        var magnitude = -speed*2;
+        var angle = this.body.angle + Math.PI / 2;
+        
+        this.body.force[0] -= Math.round(magnitude * Math.cos(angle));
+        this.body.force[1] -= Math.round(magnitude * Math.sin(angle));
+
+    },
+
+   	/**
+    * This will rotate the Body by the given speed to the left (counter-clockwise).
+    *
+    * @param {number} speed - The speed at which it should rotate.
+    */
+    rotateLeft: function (speed) {
+
+        this.body.angularVelocity = this.pxm(-speed);
+
+    },
+
+    /**
+    * This will rotate the Body by the given speed to the left (clockwise).
+    *
+    * @param {number} speed - The speed at which it should rotate.
+    */
+    rotateRight: function (speed) {
+
+        this.body.angularVelocity = this.pxm(speed);
+
+    },
+
+    stop: function(){
+    	this.body.velocity[0] = 0;
+    	this.body.velocity[1] = 0;
+    },
+
+
+    /**
+    * If this Body is dynamic then this will zero its angular velocity.
+    *
+    */
+    setZeroRotation: function () {
+
+        this.body.angularVelocity = 0;
+
+    },
+
+	pxmi: function (v) {
+        return v * -0.05;
+    },
+
+    /**
+    * Convert pixel value to p2 physics scale (meters).
+    * By default Phaser uses a scale of 20px per meter.
+    * If you need to modify this you can over-ride these functions via the Physics Configuration object.
+    *
+    * @param {number} v - The value to convert.
+    * @return {number} The scaled value.
+    */
+    pxm: function (v) {
+
+        return v * 0.05;
+
+    },
+
+    /**
+    * Convert p2 physics value (meters) to pixel scale.
+    * By default Phaser uses a scale of 20px per meter.
+    * If you need to modify this you can over-ride these functions via the Physics Configuration object.
+    *
+    * @method Phaser.Physics.P2#mpx
+    * @param {number} v - The value to convert.
+    * @return {number} The scaled value.
+    */
+    mpx: function (v) {
+
+        return v *= 20;
+
+    },
+
+    /**
+    * Convert p2 physics value (meters) to pixel scale and inverses it.
+    * By default Phaser uses a scale of 20px per meter.
+    * If you need to modify this you can over-ride these functions via the Physics Configuration object.
+    *
+    * @method Phaser.Physics.P2#mpxi
+    * @param {number} v - The value to convert.
+    * @return {number} The scaled value.
+    */
+    mpxi: function (v) {
+
+        return v *= -20;
+
+    }
+};
+
+Projectile.prototype = {
+
+	moveTowardsTarget: function(speed){
+    	if (typeof speed === 'undefined'){ 
+    		speed = 60;
+    	}
+
+		var target = this.target;
+		var angle = Math.atan2(target.body.position[1] - this.body.position[1], target.body.position[0] - this.body.position[0]);
+		
+	    this.body.rotation = angle + (90*(Math.PI/180));  // correct angle of angry bullets (depends on the sprite used)
+	    this.body.force.x = Math.cos(angle) * speed;    // accelerateToObject 
+	    this.body.force.y = Math.sin(angle) * speed;
+
+	},
+
+	dealDamage: function(unit){
+		unit.removeHealth(this.damage);
+	},
+
+	thrust: function(speed){
+     	var magnitude = -speed*2;
+        var angle = this.body.angle + Math.PI / 2;
+		   
+        this.body.force[0] += Math.round(magnitude * Math.cos(angle));
+        this.body.force[1] += Math.round(magnitude * Math.sin(angle));
+
+	},
+
+	reverse: function (speed) {
+
+        var magnitude = -speed*2;
+        var angle = this.body.angle + Math.PI / 2;
+        
+        this.body.force[0] -= Math.round(magnitude * Math.cos(angle));
+        this.body.force[1] -= Math.round(magnitude * Math.sin(angle));
+
+    },
+
+   	/**
+    * This will rotate the Body by the given speed to the left (counter-clockwise).
+    *
+    * @param {number} speed - The speed at which it should rotate.
+    */
+    rotateLeft: function (speed) {
+
+        this.body.angularVelocity = this.pxm(-speed);
+
+    },
+
+    /**
+    * This will rotate the Body by the given speed to the left (clockwise).
+    *
+    * @param {number} speed - The speed at which it should rotate.
+    */
+    rotateRight: function (speed) {
+
+        this.body.angularVelocity = this.pxm(speed);
+
+    },
+
+    stop: function(){
+    	this.body.velocity[0] = 0;
+    	this.body.velocity[1] = 0;
+    },
+
+
+    /**
+    * If this Body is dynamic then this will zero its angular velocity.
+    *
+    */
+    setZeroRotation: function () {
+
+        this.body.angularVelocity = 0;
+
+    },
+
+	pxmi: function (v) {
+        return v * -0.05;
+    },
+
+    /**
+    * Convert pixel value to p2 physics scale (meters).
+    * By default Phaser uses a scale of 20px per meter.
+    * If you need to modify this you can over-ride these functions via the Physics Configuration object.
+    *
+    * @param {number} v - The value to convert.
+    * @return {number} The scaled value.
+    */
+    pxm: function (v) {
+
+        return v * 0.05;
+
+    },
+
+    /**
+    * Convert p2 physics value (meters) to pixel scale.
+    * By default Phaser uses a scale of 20px per meter.
+    * If you need to modify this you can over-ride these functions via the Physics Configuration object.
+    *
+    * @method Phaser.Physics.P2#mpx
+    * @param {number} v - The value to convert.
+    * @return {number} The scaled value.
+    */
+    mpx: function (v) {
+
+        return v *= 20;
+
+    },
+
+    /**
+    * Convert p2 physics value (meters) to pixel scale and inverses it.
+    * By default Phaser uses a scale of 20px per meter.
+    * If you need to modify this you can over-ride these functions via the Physics Configuration object.
+    *
+    * @method Phaser.Physics.P2#mpxi
+    * @param {number} v - The value to convert.
+    * @return {number} The scaled value.
+    */
+    mpxi: function (v) {
+
+        return v *= -20;
+
+    }
+};
 
 function TransferObject(obj) {
 	this.x = obj.body.position[0];
@@ -413,6 +992,8 @@ function TransferObject(obj) {
 	this.id = obj.id;
 	this.force = [obj.body.force[0], obj.body.force[1]];
 	this.angularVelocity = obj.body.angularVelocity;
+	this.selected = obj.selected;
+	this.health = obj.health;
 
 	// console.log(this.force);
 }
@@ -425,13 +1006,3 @@ var rand = function() {
 var token = function() {
     return rand() + rand();
 };
-
-
-// var tp = new Player(null);
-
-
-
-//always wrap input angle to -PI..PI
-
-
-

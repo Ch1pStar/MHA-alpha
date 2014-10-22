@@ -1,0 +1,6 @@
+IMPORTANT
+	- A PLAYER BODY IS NOT REMOVED FROM THE PHYSICS SIMULATION WHEN A PLAYER IS DISCONNECTED
+
+Future release notes:
+	- Create a broadcast queue for client updates and push updates to it, queue is executed on each server tick(currently there are updates that are sent outside of the main loop), this will also elimate unessecary data from being sent to clients.
+	- Move pathfinding to client side to reduce server load(not a priority but should be done in the next build)
