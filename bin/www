@@ -123,7 +123,7 @@ var req = http.request(options, function(res) {
 			}
 		
 		};
-		towers = [new Tower(19, 8, 0, 5, 300), new Tower(29, 18, 1, 20, 1000)];
+		towers = [new Tower(19, 8, 0, 0.1, 30), new Tower(29, 18, 1, 20, 1000)];
 		world.on('impact', function(e){
 			// console.log(e);
 			console.log("Imapct event for objects: %s, %s", e.bodyA.id, e.bodyB.id);
