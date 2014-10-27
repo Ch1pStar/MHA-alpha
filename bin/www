@@ -133,16 +133,18 @@ var req = http.request(options, function(res) {
 					console.log("Tower was involved in impact");
 					var tHit = true;
 				}
+
 				switch(t.type){
 					case 0:
 						break;
 					case 1:
 						if(t.projectiles.length > 0){
-							for (var i = t.projectiles.length - 1; i >= 0; i--) {
+							for (var i = 0; i < t.projectiles.length; i++) {
 								var prjctl = t.projectiles[i];
 								if(e.bodyA.id == prjctl.id || e.bodyB.id == prjctl.id){
 									console.log("Projectile %s hit something", prjctl.id);
 									var prjctlHit = true;
+									var impactedProjectile = prjctl;
 								}
 							};
 						}
@@ -162,6 +164,11 @@ var req = http.request(options, function(res) {
 			if(tHit && pHit){
 				console.log("Player %s collided with tower", impactedPlayer.id);
 				impactedPlayer.removeHealth(10);
+			}
+
+			if(prjctlHit && pHit){
+				console.log("Player %s was hit by projectile %s", impactedPlayer.id, impactedProjectile.id);
+				impactedProjectile.dealDamage(impactedPlayer);
 			}
 
 		});

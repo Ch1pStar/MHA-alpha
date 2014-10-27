@@ -117,7 +117,7 @@ Player.prototype.drawPathToPoint = function(path){
 		tmpLine.drawCircle(pathItemX+18.5, pathItemY+18.5, 2); // x, y, radius
 
 		pathLines.push(tmpLine);
-		console.log(pathItemX, pathItemY);
+		// console.log(pathItemX, pathItemY);
 	}
 }
 
