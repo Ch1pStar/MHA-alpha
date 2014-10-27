@@ -28,6 +28,8 @@ var cursorDownData = {
 	action : "cursor_down"
 };
 
+var lastPingTime = 0;
+
 var towers = [];
 
 Player = function(data, isCurrPlayer){
@@ -55,7 +57,6 @@ Player = function(data, isCurrPlayer){
 
 Tower = function(data){
 
-	console.log(1231231312312);
 	console.log("Tower data... %s",data);
 	
 	this.obj = game.add.sprite(data.x, data.y, 'tower');
@@ -174,6 +175,8 @@ function openConn () {
 	};
 
 	connection.onclose = function (){
+		console.log("Lost connection to server...closing game");
+		game.destroy();
 	}
 
 	// Log messages from the server
@@ -304,8 +307,8 @@ function openConn () {
 
 function logPing() {
 	var receiveDate = (new Date()).getTime();
-	document.getElementById('ping').innerHTML = receiveDate - lastTimeSend - 300;
-	lastTimeSend = receiveDate;
+	document.getElementById('ping').innerHTML = receiveDate - lastPingTime;
+	// lastTimeSend = receiveDate;
 }
 
 function logPosition() {
@@ -316,13 +319,6 @@ function logPosition() {
 	$('#unit_health').text(currPlayer.health);
 }
 
-setInterval(function(){
-	try{
-		connection.send(JSON.stringify({action:'ms'})); 
-	}catch(e){
-		console.log("Log ping error: ", e.message);
-	}
-}, 300);
 
 function preload() {
 
@@ -408,6 +404,14 @@ function mouseClickCallback(pointer) {
 
 
 function update() {
+
+	var currTimeMs = Date.now();
+
+	if(currTimeMs - lastPingTime > 300){
+		lastPingTime = currTimeMs;
+		console.log("Sending ping probe");
+		connection.send(JSON.stringify({action:'ms'}));
+	}
 
     try{
 
