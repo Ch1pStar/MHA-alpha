@@ -429,7 +429,7 @@ function updatePlayerPosition(direction, rotation, token) {
 		
 		switch(direction){
 			case "forward":
-				p.thrust(600);
+				p.thrust(3600);
 				break;
 			case "reverse":
 				p.reverse(600);

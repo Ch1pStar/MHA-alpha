@@ -286,10 +286,8 @@ function openConn () {
 				break;
 			case "path-finished":
 				setTimeout(function(){
-					for(var i=0; i< pathLines.length; i++){
-						var lineItem = pathLines[i];
-						pathLines.splice(i,1);
-						lineItem.destroy();
+					while (pathLines.length) {
+						pathLines.pop().destroy();
 					}
 				},0);
 				break;
